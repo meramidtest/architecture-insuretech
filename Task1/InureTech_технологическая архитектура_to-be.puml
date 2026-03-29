@@ -1,0 +1,187 @@
+@startuml
+!pragma layout smetana
+
+!include /Users/vdor/Projects/tmp/yandex-cloud-plantuml/YandexCloud.puml
+!include /Users/vdor/Projects/tmp/yandex-cloud-plantuml/YandexCloudContainers.puml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title InsecureTech Architecture
+
+AddRelTag("client", $lineColor="#4A90D9", $textColor="#4A90D9", $lineStyle=BoldLine())
+AddRelTag("balancing", $lineColor="#2E86C1", $textColor="#2E86C1")
+AddRelTag("write", $lineColor="#E74C3C", $textColor="#E74C3C")
+AddRelTag("read", $lineColor="#27AE60", $textColor="#27AE60")
+AddRelTag("crossRegion", $lineColor="#8E44AD", $textColor="#8E44AD", $lineStyle=DashedLine())
+AddRelTag("replication", $lineColor="#F39C12", $textColor="#F39C12", $lineStyle=DashedLine())
+AddRelTag("backup", $lineColor="#7F8C8D", $textColor="#7F8C8D", $lineStyle=DottedLine())
+AddRelTag("healthcheck", $lineColor="#1ABC9C", $textColor="#1ABC9C", $lineStyle=DottedLine())
+AddRelTag("static", $lineColor="#E67E22", $textColor="#E67E22")
+
+YC_SecurityGroup(userBrowser, "Браузер пользователя") {
+    YC_Users(users)
+}
+
+YC_SecurityGroup(cdnBlock, "CDN\nКэширование статики") {
+    YC_CDN(cdn)
+}
+
+    YC_BlueBlock(k8sClusterBlock, "Kubernetes Cluster (stretched)") {
+    YC_Managed_Kubernetes(k8sCluster, " ")
+
+    YC_AvailabilityZone(availabilityZone1, "Зона доступности Москва") {
+        YC_SecurityGroup(gslbGroup1, "Global Server Load Balancing") {
+            YC_Cloud_DNS(gslb1, "GSLB (Cloud DNS)")
+        }
+
+        YC_SecurityGroup(albGroup1, "Load Balancer") {
+            YC_Application_Load_Balancer(alb1, "Application Load Balancer")
+        }
+
+        YC_SecurityGroup(insurtechNamespaceAz1, "InsureTech namespace") {
+            Container(webAz1, "InsureTechWeb", "nginx + React SPA, ×2 HPA", "min 2 -> max 6\nСтатика + SPA fallback")
+            Container(coreAz1, "core-app", "Kotlin, Spring, ×3 HPA", "min 3 -> max 10")
+            Container(clientAz1, "client-info", "Kotlin, Spring, ×2 HPA", "min 2 -> max 6")
+        }
+
+        YC_BlueBlock(postgresVmBlock1, "VM 1") {
+            YC_Managed_Kubernetes(postgresVm1, " ")
+
+            YC_SecurityGroup(pgpoolGroup1, "Pgpool-II") {
+                Container(pgpool1, "Pgpool-II", "middleware", "Connection pooling,\nquery routing,\nload balancing")
+            }
+
+            YC_SecurityGroup(postgresMasterGroup, "PostgreSQL (шард МСК, master)") {
+                YC_Managed_PostgreSQL(postgresMaster)
+            }
+
+            YC_SecurityGroup(postgresReadReplica1, "PostgreSQL (шард МСК, read-replica)") {
+                YC_Managed_PostgreSQL(pgReadReplica1)
+            }
+
+            YC_SecurityGroup(walg1Group, "WAL-G") {
+                Container(walg1, "WAL-G", "backup agent", "Полные бэкапы +\nнепрерывная архивация WAL")
+            }
+        }
+}
+
+    YC_AvailabilityZone(availabilityZone2, "Зона доступности Екатеринбург") {
+
+        YC_SecurityGroup(gslbGroup2, "Global Server Load Balancing") {
+            YC_Cloud_DNS(gslb2, "GSLB (Cloud DNS)")
+        }
+
+        YC_SecurityGroup(albGroup2, "Load Balancer") {
+            YC_Application_Load_Balancer(alb2, "Application Load Balancer")
+        }
+
+        YC_SecurityGroup(insurtechNamespaceAz2, "InsureTech namespace") {
+            Container(webAz2, "InsureTechWeb", "nginx + React SPA, ×2 HPA", "min 2 -> max 6\nСтатика + SPA fallback")
+            Container(coreAz2, "core-app", "Kotlin, Spring, ×3 HPA", "min 3 -> max 10")
+            Container(clientAz2, "client-info", "Kotlin, Spring, ×2 HPA", "min 2 -> max 6")
+        }
+
+        YC_BlueBlock(postgresVmBlock2, "VM 2") {
+            YC_Managed_Kubernetes(postgresVm2, " ")
+
+            YC_SecurityGroup(pgpoolGroup2, "Pgpool-II") {
+                Container(pgpool2, "Pgpool-II", "middleware", "Connection pooling,\nquery routing,\nload balancing")
+            }
+
+            YC_SecurityGroup(pgEkbMasterGroup, "PostgreSQL (шард ЕКБ, master)") {
+                YC_Managed_PostgreSQL(postgresReplica)
+            }
+
+            YC_SecurityGroup(postgresReadReplica2, "PostgreSQL (шард ЕКБ, read-replica)") {
+                YC_Managed_PostgreSQL(pgReadReplica2)
+            }
+
+            YC_SecurityGroup(walg2Group, "WAL-G") {
+                Container(walg2, "WAL-G", "backup agent", "Полные бэкапы +\nнепрерывная архивация WAL")
+            }
+        }
+    }
+}
+
+Rel(userBrowser, gslbGroup1, "Получает IP зоны доступности", $tags="client")
+Rel(userBrowser, gslbGroup2, "Получает IP зоны доступности", $tags="client")
+
+Rel(userBrowser, cdnBlock, "Загрузка SPA + статика", $techn="HTTPS", $tags="static")
+Rel(cdnBlock, albGroup1, "Cache miss / origin", $tags="static")
+Rel(cdnBlock, albGroup2, "Cache miss / origin", $tags="static")
+
+Rel(userBrowser, albGroup1, "API запросы", $techn="HTTPS", $tags="client")
+Rel(userBrowser, albGroup2, "API запросы", $techn="HTTPS", $tags="client")
+
+Rel(albGroup1, webAz1, "Статика (/, *.js, *.css)", $tags="static")
+Rel(albGroup2, webAz2, "Статика (/, *.js, *.css)", $tags="static")
+Rel(albGroup1, coreAz1, " ", $tags="balancing")
+Rel(albGroup2, coreAz2, " ", $tags="balancing")
+
+Rel(coreAz1, clientAz1, "Данные клиентов", $techn="HTTP", $tags="balancing")
+Rel(coreAz2, clientAz2, "Данные клиентов", $techn="HTTP", $tags="balancing")
+
+Rel(coreAz1, pgpoolGroup1, "R/W данные МСК региона", $techn="TCP", $tags="balancing")
+Rel(clientAz1, pgpoolGroup1, "R/W данные МСК региона", $techn="TCP", $tags="balancing")
+Rel(coreAz2, pgpoolGroup2, "R/W данные ЕКБ региона", $techn="TCP", $tags="balancing")
+Rel(clientAz2, pgpoolGroup2, "R/W данные ЕКБ региона", $techn="TCP", $tags="balancing")
+
+Rel(pgpool1, postgresMasterGroup, "Write", $techn="TCP", $tags="write")
+Rel(pgpool1, postgresReadReplica1, "Read", $techn="TCP", $tags="read")
+Rel(pgpool2, pgEkbMasterGroup, "Write", $techn="TCP", $tags="write")
+Rel(pgpool2, postgresReadReplica2, "Read", $techn="TCP", $tags="read")
+
+Rel(pgpool1, pgEkbMasterGroup, "Кросс-региональный запрос", $techn="TCP", $tags="crossRegion")
+Rel(pgpool2, postgresMasterGroup, "Кросс-региональный запрос", $techn="TCP", $tags="crossRegion")
+
+Rel(pgEkbMasterGroup, postgresReadReplica2, "Репликация", $techn="TCP", $tags="replication")
+Rel(postgresMasterGroup, postgresReadReplica1, "Репликация", $techn="TCP", $tags="replication")
+
+note top of gslbGroup2
+  GSLB в каждом кластере для fail-over кейса
+
+  Проверяет доступность соседней зоны доступности, чтобы в случае вывода ее из строя, не передавать ее IP-адрес
+end note
+
+note top of k8sClusterBlock
+  Один растянутый кластер для быстрого переключения трафика в случае полного сбоя одного из ЦОД
+end note
+
+
+note top of postgresMasterGroup
+  Шардирование по регионам:
+  данные пользователей МСК
+  пишутся в локальный шард
+end note
+
+note top of pgEkbMasterGroup
+  Шардирование по регионам:
+  данные пользователей ЕКБ
+  пишутся в локальный шард
+end note
+
+YC_SecurityGroup(backupStorage, "Backup Storage (гео-избыточное)") {
+    YC_Object_Storage(s3Backup, "Object Storage (S3)\nPG Backups + WAL Archive")
+}
+
+Rel(walg1, postgresMasterGroup, "pg_basebackup + WAL read", $techn="TCP", $tags="backup")
+Rel(walg2, pgEkbMasterGroup, "pg_basebackup + WAL read", $techn="TCP", $tags="backup")
+
+Rel(walg1, backupStorage, "Upload backups", $techn="S3 API", $tags="backup")
+Rel(walg2, backupStorage, "Upload backups", $techn="S3 API", $tags="backup")
+
+Rel(gslbGroup1, coreAz2, "Проверка доступности соседней ЗД для Failover стратегии", $techn="healthcheck", $tags="healthcheck")
+Rel(gslbGroup2, coreAz1, "Проверка доступности соседней ЗД Cluster-а для Failover стратегии", $techn="healthcheck", $tags="healthcheck")
+
+legend right
+  |<#E67E22>  | Статика (CDN -> ALB -> nginx) |
+  |<#4A90D9>  | Клиентский трафик (DNS, HTTPS) |
+  |<#2E86C1>  | Балансировка нагрузки |
+  |<#E74C3C>  | Запись (Write) |
+  |<#27AE60>  | Чтение (Read) |
+  |<#8E44AD>  | Кросс-региональный запрос |
+  |<#F39C12>  | Репликация |
+  |<#7F8C8D>  | Бэкапы |
+  |<#1ABC9C>  | Healthcheck |
+endlegend
+
+@enduml

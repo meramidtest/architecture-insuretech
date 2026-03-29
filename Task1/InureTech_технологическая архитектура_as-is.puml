@@ -1,0 +1,38 @@
+@startuml
+!pragma layout smetana
+
+!include /Users/vdor/Projects/tmp/yandex-cloud-plantuml/YandexCloud.puml
+!include /Users/vdor/Projects/tmp/yandex-cloud-plantuml/YandexCloudContainers.puml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title RAG Pipeline
+
+YC_SecurityGroup(userBrowser, "Браузер пользователя") {
+    YC_Users(users)
+}
+
+YC_AvailabilityZone(availabilityZone1, "Зона доступности 1") {
+    YC_BlueBlock(k8sClusterBlock, "Kubernetes Cluster 1") {
+        YC_Managed_Kubernetes(k8sCluster, " ")
+
+        YC_SecurityGroup(insurtechNamespace, "InsecureTech namespace") {
+            YC_Managed_Kubernetes(insurtechApp)
+        }
+    }
+
+    YC_BlueBlock(postgresVmBlock, "VM 1") {
+            YC_Managed_Kubernetes(postgresVm, " ")
+
+            YC_SecurityGroup(postgresMasterGroup, "PosgreSQL (master)") {
+                YC_Managed_PostgreSQL(postgresMaster)
+            }
+    }
+}
+
+Rel(userBrowser, availabilityZone1, " ")
+
+
+Rel(insurtechNamespace, postgresMasterGroup, " ", $techn="TCP")
+
+
+@enduml
