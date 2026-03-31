@@ -1,0 +1,54 @@
+@startuml
+!pragma layout smetana
+
+!include /Users/vdor/Projects/tmp/yandex-cloud-plantuml/YandexCloud.puml
+!include /Users/vdor/Projects/tmp/yandex-cloud-plantuml/YandexCloudContainers.puml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title ScaleTestApp Architecture (to-be)
+
+AddRelTag("client", $lineColor="#4A90D9", $textColor="#4A90D9", $lineStyle=BoldLine())
+AddRelTag("metrics", $lineColor="#E74C3C", $textColor="#E74C3C", $lineStyle=DashedLine())
+AddRelTag("internal", $lineColor="#2E86C1", $textColor="#2E86C1")
+AddRelTag("scaling", $lineColor="#F39C12", $textColor="#F39C12", $lineStyle=DashedLine())
+
+YC_SecurityGroup(userBrowser, "Браузер пользователя") {
+    YC_Users(users)
+}
+
+YC_BlueBlock(minikubeCluster, "Kubernetes кластер (minikube)") {
+    YC_Managed_Kubernetes(k8sCluster, " ")
+
+    YC_SecurityGroup(scaletestNamespace, "scaletest namespace") {
+        Container(scaletestService, "scaletestapp-service", "Kubernetes Service", "Маршрутизация к подам\nна основе readiness")
+        Container(scaletestapp, "scaletestapp", "Application, HPA", "min 1 -> max N\nАвтомасштабируемые поды")
+        Container(hpa, "HorizontalPodAutoscaler", "HPA", "Масштабирует поды scaletestapp\nна основе метрик")
+    }
+
+    YC_SecurityGroup(kubeSystemNamespace, "kube-system namespace") {
+        Container(metricsServer, "metrics-server", "Metrics Server", "Метрики CPU/Memory\nдля принятия решений HPA")
+    }
+
+    YC_SecurityGroup(monitoringNamespace, "monitoring namespace") {
+        Container(prometheus, "Prometheus", "Мониторинг", "Сбор и хранение\nметрик")
+        Container(prometheusWebUI, "Prometheus Web UI", "Веб-интерфейс", "Запросы и визуализация\nметрик")
+    }
+}
+
+Rel(userBrowser, scaletestService, "Запросы", $techn="HTTP", $tags="client")
+Rel(userBrowser, prometheusWebUI, "Доступ к Prometheus UI", $techn="HTTP", $tags="client")
+Rel(scaletestService, scaletestapp, "Маршрутизация к подам", $techn="HTTP", $tags="internal")
+Rel(prometheus, scaletestapp, "Сбор метрик /metrics", $techn="HTTP", $tags="metrics")
+Rel(prometheusWebUI, prometheus, "PromQL запросы", $techn="HTTP", $tags="internal")
+Rel(metricsServer, scaletestapp, "Сбор CPU/Memory", $techn="HTTP", $tags="metrics")
+Rel(hpa, metricsServer, "Запрос метрик", $techn="HTTP", $tags="scaling")
+Rel(hpa, scaletestapp, "Масштабирование реплик", $tags="scaling")
+
+legend right
+  |<#4A90D9>  | Клиентский трафик |
+  |<#E74C3C>  | Сбор метрик |
+  |<#2E86C1>  | Внутренняя коммуникация |
+  |<#F39C12>  | Автомасштабирование |
+endlegend
+
+@enduml
