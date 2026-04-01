@@ -1,0 +1,72 @@
+@startuml
+!include <c4/C4_Context>
+!include <c4/C4_Container>
+
+!include <tupadr3/devicons/postgresql>
+!include <tupadr3/devicons2/react_original>
+!include <tupadr3/devicons2/kotlin>
+!include <tupadr3/font-awesome-5/users>
+
+LAYOUT_WITH_LEGEND()
+
+title C4 Container Diagram - InsureTech (TO-BE)
+
+AddElementTag("new", $bgColor="#E8F5E9", $fontColor="#1B5E20", $borderColor="#2E7D32", $legendText="Новое в TO-BE")
+AddRelTag("new_rel", $textColor="#1B5E20", $lineColor="#2E7D32", $legendText="Новая связь в TO-BE")
+
+Person(client, "Клиент", "Клиент системы InsureTech", $sprite="users")
+
+System_Boundary(insuretech, "InsureTech") {
+
+    Container(web_app, "InsecureTechWeb", "Javascript, React", "Веб-приложение InsecureTech", $sprite="react_original")
+
+    Container(client_info, "client-info", "Kotlin, SpringBoot", "Сервис для учета клиентских данных", $sprite="kotlin")
+
+    ContainerDb(client_info_db, "client-info-db", "PostgreSQL", "БД для хранения данных клиентов: ФИО, телефон, паспорт", $sprite="postgresql")
+
+    Container(core_app, "core-app", "Kotlin", "Монолитное приложение:\n• отображает данные о доступных страховых продуктах из локальной реплики\n• оформляет новые страховки\n• публикует события об оформленных страховках", $sprite="kotlin")
+
+    Container(ins_product_aggregator, "ins-product-aggregator", "Kotlin, SpringBoot", "Сервис для интеграции со страховыми компаниями:\n• по расписанию запрашивает продукты и тарифы\n• агрегирует и нормализует данные\n• публикует события об изменениях каталога", $sprite="kotlin")
+
+    Container(event_bus, "event-bus", "Kafka", "Брокер событий:\n• ProductCatalogUpdated\n• TariffUpdated\n• InsurancePolicyCreated", $tags="new")
+
+    ContainerDb(core_db, "core-db", "PostgreSQL", "БД используется для хранения локальной реплики тарифов страховых компаний, а также заявок клиентов на страховые продукты и outbox core-app", $sprite="postgresql")
+
+    Container(ins_comp_settlement, "ins-comp-settlement", "Kotlin, SpringBoot", "Сервис для осуществления взаиморасчётов со страховыми компаниями:\n• хранит локальную реплику продуктов и тарифов\n• получает события об оформленных страховках", $sprite="kotlin")
+
+    ContainerDb(ins_comp_settlement_db, "ins-comp-settlement-db", "PostgreSQL", "БД используется для хранения оформленных страховок, локальной реплики тарифов и условий взаиморасчётов с клиентами", $sprite="postgresql")
+
+    ContainerDb(ins_product_aggregator_db, "ins-product-aggregator-db", "PostgreSQL", "БД используется для хранения агрегированного каталога продуктов, тарифов и outbox ins-product-aggregator", $sprite="postgresql", $tags="new")
+}
+
+System_Ext(insurance_systems, "Системы страховых компаний", "Предоставляют API для получения актуальных тарифов, андерайтинга и оформления страховых продуктов")
+
+System_Ext(partner_systems, "Системы партнёров", "Системы партнёров, интегрирующие страховые услуги в свои продукты")
+
+System_Ext(payment_service, "Платёжный сервис", "Внешний платёжный сервис, через который осуществляется оплата страховок. Деньги уходят на счета страховых компаний")
+
+Rel(client, web_app, "Использует")
+
+Rel(web_app, core_app, "1. Получение тарифов\n2. Создание заявок на страховки", "REST")
+Rel(web_app, client_info, "Получение/сохранение информации о клиентах", "REST")
+Rel(web_app, payment_service, "Проведение оплаты за страховки (redirect)", "HTTP")
+
+Rel(core_app, core_db, "Работа с данными", "TCP")
+Rel(core_app, client_info, "Получение/сохранение информации о клиентах", "REST")
+Rel(core_app, payment_service, "Проведение оплаты за страховки", "HTTP")
+Rel(core_app, event_bus, "Публикация события об оформленной страховке", "Kafka + Transactional Outbox", $tags="new_rel")
+Rel(event_bus, core_app, "Получение обновлений продуктов и тарифов", "Kafka", $tags="new_rel")
+
+Rel(ins_product_aggregator, ins_product_aggregator_db, "Работа с данными", "TCP", $tags="new_rel")
+Rel(ins_product_aggregator, insurance_systems, "Получение информации по продуктам и тарифам по расписанию", "REST / SOAP / GraphQL")
+Rel(ins_product_aggregator, event_bus, "Публикация обновлений каталога и тарифов", "Kafka + Transactional Outbox", $tags="new_rel")
+
+Rel(ins_comp_settlement, ins_comp_settlement_db, "Работа с данными", "TCP")
+Rel(event_bus, ins_comp_settlement, "Получение оформленных страховок,\nобновлений продуктов и тарифов", "Kafka", $tags="new_rel")
+Rel(ins_comp_settlement, insurance_systems, "Передача данных для взаиморасчётов", "REST / SOAP / GraphQL")
+
+Rel(client_info, client_info_db, "Работа с данными", "TCP")
+
+Rel(partner_systems, core_app, "Оформление страховок", "REST")
+
+@enduml
