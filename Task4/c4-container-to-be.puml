@@ -1,0 +1,111 @@
+@startuml
+!include <c4/C4_Context>
+!include <c4/C4_Container>
+
+!include <tupadr3/devicons/postgresql>
+!include <tupadr3/devicons2/react_original>
+!include <tupadr3/devicons2/kotlin>
+!include <tupadr3/font-awesome-5/users>
+
+LAYOUT_WITH_LEGEND()
+
+title C4 Container Diagram - InsureTech (Task4 / OSAGO TO-BE)
+
+AddElementTag("new_osago", $bgColor="#E8F5E9", $fontColor="#1B5E20", $borderColor="#2E7D32", $legendText="Новый контейнер для сценария ОСАГО")
+AddRelTag("sse", $lineColor="#1565C0", $textColor="#1565C0", $lineStyle=BoldLine(), $legendText="SSE")
+AddRelTag("rate_limit", $lineColor="#EF6C00", $textColor="#EF6C00", $lineStyle=BoldLine(), $legendText="Rate Limiting")
+AddRelTag("async_event", $lineColor="#6A1B9A", $textColor="#6A1B9A", $lineStyle=DashedLine(), $legendText="Асинхронное событие")
+AddRelTag("resilience", $lineColor="#C62828", $textColor="#C62828", $lineStyle=DashedLine(), $legendText="Circuit Breaker + Retry + Timeout")
+
+Person(client, "Клиент", "Клиент системы InsureTech", $sprite="users")
+
+System_Boundary(insuretech, "InsureTech") {
+
+    Container(web_app, "InsecureTechWeb", "Javascript, React", "Веб-приложение InsureTech:\n• создает заявки на ОСАГО\n• показывает предложения от страховых компаний по мере поступления", $sprite="react_original")
+
+    Container(client_info, "client-info", "Kotlin, SpringBoot", "Сервис для учета клиентских данных", $sprite="kotlin")
+
+    ContainerDb(client_info_db, "client-info-db", "PostgreSQL", "БД для хранения данных клиентов: ФИО, телефон, паспорт", $sprite="postgresql")
+
+    Container(core_app, "core-app", "Kotlin", "Монолитное приложение:\n• отображает данные о доступных страховых продуктах из локальной реплики\n• оформляет новые страховки\n• принимает заявки на ОСАГО\n• стримит предложения ОСАГО в веб-приложение", $sprite="kotlin")
+
+    Container(ins_product_aggregator, "ins-product-aggregator", "Kotlin, SpringBoot", "Сервис для интеграции со страховыми компаниями:\n• по расписанию запрашивает продукты и тарифы\n• агрегирует и нормализует данные\n• публикует события об изменениях каталога", $sprite="kotlin")
+
+    Container(osago_aggregator, "osago-aggregator", "Kotlin, SpringBoot", "Сервис для сценария ОСАГО:\n• принимает заявку от core-app\n• создает заявки во всех страховых компаниях\n• опрашивает предложения до 60 секунд\n• публикует событие при получении каждого предложения", $sprite="kotlin", $tags="new_osago")
+
+    Container(event_bus, "event-bus", "Kafka", "Брокер событий:\n• ProductCatalogUpdated\n• TariffUpdated\n• InsurancePolicyCreated\n• ApplicationOfferCreated")
+
+    ContainerDb(core_db, "core-db", "PostgreSQL", "БД используется для хранения локальной реплики тарифов страховых компаний, заявок клиентов на страховые продукты, заявок ОСАГО и полученных предложений", $sprite="postgresql")
+
+    ContainerDb(ins_product_aggregator_db, "ins-product-aggregator-db", "PostgreSQL", "БД используется для хранения агрегированного каталога продуктов, тарифов и outbox ins-product-aggregator", $sprite="postgresql")
+
+    ContainerDb(osago_aggregator_db, "osago-aggregator-db", "PostgreSQL", "БД используется для хранения заявок ОСАГО, correlation id запросов к страховым компаниям, статусов опроса и outbox osago-aggregator", $sprite="postgresql", $tags="new_osago")
+
+    Container(ins_comp_settlement, "ins-comp-settlement", "Kotlin, SpringBoot", "Сервис для осуществления взаиморасчётов со страховыми компаниями:\n• хранит локальную реплику продуктов и тарифов\n• получает события об оформленных страховках", $sprite="kotlin")
+
+    ContainerDb(ins_comp_settlement_db, "ins-comp-settlement-db", "PostgreSQL", "БД используется для хранения оформленных страховок, локальной реплики тарифов и условий взаиморасчётов с клиентами", $sprite="postgresql")
+}
+
+System_Ext(insurance_systems, "Системы страховых компаний", "Предоставляют API для получения актуальных тарифов, андерайтинга, оформления страховых продуктов и ОСАГО")
+
+System_Ext(partner_systems, "Системы партнёров", "Системы партнёров, интегрирующие страховые услуги в свои продукты")
+
+System_Ext(payment_service, "Платёжный сервис", "Внешний платёжный сервис, через который осуществляется оплата страховок. Деньги уходят на счета страховых компаний")
+
+' Клиент
+Rel(client, web_app, "Использует")
+
+' InsureTech Web
+Rel(web_app, core_app, "Получение тарифов,\nсоздание заявок на страховки и ОСАГО", "REST")
+Rel_D(core_app, web_app, "Стриминг предложений ОСАГО по мере поступления", "SSE", $tags="sse")
+Rel(web_app, client_info, "Получение/сохранение информации о клиентах", "REST")
+Rel(web_app, payment_service, "Проведение оплаты за страховки (redirect)", "HTTP")
+
+' core-app
+Rel(core_app, core_db, "Работа с данными", "TCP")
+Rel(core_app, client_info, "Получение/сохранение информации о клиентах", "REST")
+Rel(core_app, payment_service, "Проведение оплаты за страховки", "HTTP")
+Rel(core_app, osago_aggregator, "Создание заявки ОСАГО", "REST", $tags="rate_limit")
+Rel(core_app, event_bus, "Публикация события об оформленной страховке", "Kafka + Transactional Outbox")
+Rel(event_bus, core_app, "Получение обновлений продуктов и тарифов", "Kafka")
+Rel_U(event_bus, core_app, "Получение предложений ОСАГО\nApplicationOfferCreated", "Kafka", $tags="async_event")
+
+' ins-product-aggregator
+Rel(ins_product_aggregator, ins_product_aggregator_db, "Работа с данными", "TCP")
+Rel(ins_product_aggregator, insurance_systems, "Получение информации по продуктам и тарифам по расписанию", "REST / SOAP / GraphQL")
+Rel(ins_product_aggregator, event_bus, "Публикация обновлений каталога и тарифов", "Kafka + Transactional Outbox")
+
+' osago-aggregator
+Rel(osago_aggregator, osago_aggregator_db, "Работа с данными", "TCP")
+Rel(osago_aggregator, insurance_systems, "1. Создание заявок ОСАГО\n2. Опрос предложений до 60 секунд", "REST", $tags="resilience")
+Rel(osago_aggregator, event_bus, "Публикация события с предложением ОСАГО", "Kafka + Transactional Outbox", $tags="async_event")
+
+' ins-comp-settlement
+Rel(ins_comp_settlement, ins_comp_settlement_db, "Работа с данными", "TCP")
+Rel(event_bus, ins_comp_settlement, "Получение оформленных страховок,\nобновлений продуктов и тарифов", "Kafka")
+Rel(ins_comp_settlement, insurance_systems, "Передача данных для взаиморасчётов", "REST / SOAP / GraphQL")
+
+' client-info
+Rel(client_info, client_info_db, "Работа с данными", "TCP")
+
+' Внешние системы
+Rel(partner_systems, core_app, "Оформление страховок", "REST")
+
+note right of osago_aggregator
+Несколько экземпляров osago-aggregator безопасны:
+состояние заявки и статусы опроса
+хранятся в общей БД,
+события публикуются через outbox.
+Rate Limiting должен считаться
+общим для всех экземпляров.
+end note
+
+note right of core_app
+Несколько экземпляров core-app безопасны:
+предложения ОСАГО сохраняются
+в общей БД и приходят через Kafka.
+SSE-клиент может переподключиться
+к другому экземпляру по Last-Event-ID.
+end note
+
+@enduml
